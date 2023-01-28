@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-const converter = require('swagger2-to-postmanv2')
-const collection = require('./lib/collection')
+const converter = require('openapi-to-postmanv2')
 process.env.SUPPRESS_NO_CONFIG_WARNING = 'y';
 var configModule = require('config')
 config = configModule.util.loadFileConfigs(__dirname + '/config/')
-const fetch = require('./lib/fetch')
+const fs = require('fs');
 const merger=require('./lib/merger')
 
 const program = require('commander')
@@ -15,7 +14,7 @@ program.version('1.0.0')
 
 
 var serviceConfig = config[program.service]
-var url = serviceConfig.url
+var postmanFolder = serviceConfig.postman_path
 var collectionName = serviceConfig.collection_name
 
 //run update
@@ -23,27 +22,15 @@ update().catch(err => {
     console.error("run failed," + err)
 })
 
-//get swagger json
-function getSwaggerJson(url) {
-    return fetch({
-        url: url,
-        methods: 'get'
-    }).then(response => {
-        return response.data
-    })
+//get swagger json & current collection
+function getPostmanFile(file) {
+    return JSON.parse(fs.readFileSync(postmanFolder + file, 'utf8'))
 }
 
 
 
 async function update() {
-    var swaggerJson = await getSwaggerJson(url)
-    //add postman collection used info
-    swaggerJson['info'] = {
-        'title': collectionName,
-        'description': collectionName + ' api',
-        'version': '1.0.0',
-        '_postman_id': '807bb824-b333-4b59-a6ef-a8d46d3b95bf'
-    }
+    var swaggerJson = getPostmanFile('/schemas/swagger.json')
     var converterInputData = {
         'type': 'json',
         'data': swaggerJson
@@ -57,26 +44,9 @@ async function update() {
             return
         }
         var convertedJson = res.output[0].data
-
-        var id = await collection.getCollectionId(collectionName)
-        if (id === null) {
-            return
-        }
-        var collectionJson = {
-            'collection': {
-                'info': {
-                    'name': collectionName,
-                    'description': collectionName + ' api',
-                    '_postman_id': id,
-                    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-
-                },
-                "item": convertedJson.item
-            }
-        }
-    
-        var savedCollection = await collection.getCollectionDetail(id)   
-        var mergedCollection=merger.merge(savedCollection,collectionJson)    
-        collection.updateCollection(id, mergedCollection)
+        var savedCollection = getPostmanFile('/collections/' + collectionName + '.json')
+        var mergedCollection=merger.merge(savedCollection,convertedJson)
+        fs.writeFileSync(postmanFolder + '/collections/Collection.json', JSON.stringify(mergedCollection, null, 2))
+        console.log('New collection created successfully!')
     })
 }
